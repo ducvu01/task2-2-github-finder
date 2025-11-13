@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>GitHub Repo Finder</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #0d1117;
+        color: #c9d1d9;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 40px;
+      }
+      .header h1 {
+        color: #58a6ff;
+        margin-bottom: 10px;
+      }
+      .search-container {
+        background: #161b22;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 30px;
+      }
+      .search-box {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+      .search-box input {
+        flex: 1;
+        padding: 12px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #c9d1d9;
+        font-size: 16px;
+      }
+      .search-box button {
+        padding: 12px 30px;
+        background: #238636;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .filters {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .filters label {
+        color: #8b949e;
+      }
+      .filters select {
+        padding: 8px 12px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #c9d1d9;
+      }
+      .repo-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 15px;
+        transition: transform 0.15s, border-color 0.15s;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      .repo-card:hover {
+        transform: translateY(-2px);
+        border-color: #58a6ff;
+      }
+      .repo-left {
+        flex: 1;
+      }
+      .repo-right {
+        text-align: right;
+        min-width: 120px;
+      }
+      .repo-name {
+        color: #58a6ff;
+        font-size: 18px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .repo-name:hover {
+        text-decoration: underline;
+      }
+      .repo-description {
+        color: #8b949e;
+        margin: 8px 0;
+      }
+      .repo-meta {
+        display: flex;
+        gap: 12px;
+        color: #8b949e;
+        font-size: 13px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .language-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        background: #1f6feb;
+        border-radius: 12px;
+        font-size: 12px;
+        color: white;
+      }
+      .owner {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        color: #c9d1d9;
+        font-size: 14px;
+      }
+      .owner img {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 1px solid #30363d;
+      }
+      .loading {
+        text-align: center;
+        padding: 40px;
+        color: #8b949e;
+      }
+      .error {
+        background: #da3633;
+        color: white;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+      }
+      .load-more {
+        text-align: center;
+        margin: 30px 0;
+      }
+      .load-more button {
+        padding: 12px 40px;
+        background: #21262d;
+        border: 1px solid #30363d;
+        color: #c9d1d9;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .small {
+        font-size: 13px;
+        color: #8b949e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🔍 GitHub Repository Finder</h1>
+        <p style="color: #8b949e">Search and explore GitHub repositories</p>
+      </div>
+
+      <div class="search-container">
+        <div class="search-box">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search repositories..."
+            onkeypress="if(event.key==='Enter') performSearch()"
+          />
+          <button onclick="performSearch()">Search</button>
+        </div>
+
+        <div class="filters">
+          <label>Sort by:</label>
+          <select id="sortSelect" onchange="performSearch()">
+            <option value="stars">⭐ Stars</option>
+            <option value="forks">🔱 Forks</option>
+            <option value="updated">🕒 Recently Updated</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="errorMessage"></div>
+      <div id="repoList"></div>
+      <div id="loadMoreContainer"></div>
+    </div>
+
+    <script>
+      let currentPage = 1;
+      let currentQuery = "";
+      let totalResults = 0;
+      const PER_PAGE = 10;
+
+      async function searchRepositories(query, sort = "stars", page = 1) {
+        // query must be non-empty
+        const q = encodeURIComponent(query);
+        const url = `https://api.github.com/search/repositories?q=${q}&sort=${encodeURIComponent(
+          sort
+        )}&page=${page}&per_page=${PER_PAGE}`;
+        try {
+          const res = await fetch(url, {
+            headers: {
+              Accept: "application/vnd.github.v3+json",
+            },
+          });
+          // Rate limiting: GitHub returns 403 with body message about rate limit
+          if (!res.ok) {
+            const bodyText = await res.text().catch(() => null);
+            // try to parse json to get message
+            let msg = bodyText;
+            try {
+              const parsed = bodyText ? JSON.parse(bodyText) : null;
+              if (parsed && parsed.message) msg = parsed.message;
+            } catch (e) {
+              // ignore h
+            }
+
+            // If rate limit exceeded
+            if (
+              res.status === 403 &&
+              msg &&
+              msg.toLowerCase().includes("rate limit")
+            ) {
+              const reset = res.headers.get("x-ratelimit-reset");
+              let human = "";
+              if (reset) {
+                const resetDate = new Date(parseInt(reset, 10) * 1000);
+                human = ` Rate limit resets at ${resetDate.toLocaleTimeString()}.`;
+              }
+              throw new Error(
+                "Rate limit exceeded. You can try again later." + human
+              );
+            }
+
+            if (res.status === 422) {
+              throw new Error("Search query invalid. Try a different keyword.");
+            }
+
+            throw new Error(msg || `GitHub API error ${res.status}`);
+          }
+
+          const data = await res.json();
+          // data: { total_count, items: [] }
+          return {
+            total_count: data.total_count,
+            items: data.items || [],
+          };
+        } catch (err) {
+          throw err;
+        }
+      }
+
+      function createRepoCard(repo) {
+        const card = document.createElement("div");
+        card.className = "repo-card";
+
+        // left side: main info
+        const left = document.createElement("div");
+        left.className = "repo-left";
+        const name = document.createElement("a");
+        name.className = "repo-name";
+        name.href = repo.html_url;
+        name.target = "_blank";
+        name.rel = "noopener";
+        name.textContent = `${repo.full_name}`;
+
+        const desc = document.createElement("div");
+        desc.className = "repo-description";
+        desc.textContent = repo.description || "";
+
+        const meta = document.createElement("div");
+        meta.className = "repo-meta";
+
+        const stars = document.createElement("div");
+        stars.innerHTML = `⭐ ${formatNumber(repo.stargazers_count)}`;
+
+        const forks = document.createElement("div");
+        forks.innerHTML = `🔱 ${formatNumber(repo.forks_count)}`;
+
+        const lang = document.createElement("div");
+        if (repo.language) {
+          const badge = document.createElement("span");
+          badge.className = "language-badge";
+          badge.textContent = repo.language;
+          lang.appendChild(badge);
+        } else {
+          lang.textContent = "";
+        }
+
+        const updated = document.createElement("div");
+        updated.className = "small";
+        updated.textContent = `Updated: ${new Date(
+          repo.updated_at
+        ).toLocaleDateString()}`;
+
+        meta.appendChild(stars);
+        meta.appendChild(forks);
+        meta.appendChild(lang);
+        meta.appendChild(updated);
+
+        left.appendChild(name);
+        left.appendChild(desc);
+        left.appendChild(meta);
+
+        // right side: owner info
+        const right = document.createElement("div");
+        right.className = "repo-right";
+        const ownerDiv = document.createElement("div");
+        ownerDiv.className = "owner";
+        const avatar = document.createElement("img");
+        avatar.src =
+          repo.owner && repo.owner.avatar_url ? repo.owner.avatar_url : "";
+        avatar.alt =
+          repo.owner && repo.owner.login ? repo.owner.login : "owner";
+        const ownerLink = document.createElement("a");
+        ownerLink.href =
+          repo.owner && repo.owner.html_url
+            ? repo.owner.html_url
+            : `https://github.com/${repo.owner.login}`;
+        ownerLink.target = "_blank";
+        ownerLink.rel = "noopener";
+        ownerLink.textContent = repo.owner ? repo.owner.login : "owner";
+        ownerLink.style.color = "#c9d1d9";
+        ownerDiv.appendChild(avatar);
+        ownerDiv.appendChild(ownerLink);
+
+        right.appendChild(ownerDiv);
+
+        card.appendChild(left);
+        card.appendChild(right);
+
+        return card;
+      }
+
+      function displayRepositories(repos, append = false) {
+        const container = document.getElementById("repoList");
+        if (!append) container.innerHTML = "";
+
+        if (!Array.isArray(repos) || repos.length === 0) {
+          if (!append) {
+            container.innerHTML = `<div class="loading">No repositories found.</div>`;
+          }
+          updateLoadMore(); // will hide load more
+          return;
+        }
+
+        // create and append cards
+        const fragment = document.createDocumentFragment();
+        repos.forEach((repo) => {
+          const card = createRepoCard(repo);
+          fragment.appendChild(card);
+        });
+
+        container.appendChild(fragment);
+        updateLoadMore();
+      }
+
+      async function performSearch() {
+        clearError();
+        const input = document.getElementById("searchInput");
+        const sort = document.getElementById("sortSelect").value || "stars";
+        const query = input.value.trim();
+        if (!query) {
+          showError("Please enter a search keyword.");
+          return;
+        }
+
+        // reset
+        currentQuery = query;
+        currentPage = 1;
+        totalResults = 0;
+        document.getElementById(
+          "repoList"
+        ).innerHTML = `<div class="loading">Searching repositories…</div>`;
+        document.getElementById("loadMoreContainer").innerHTML = "";
+
+        try {
+          const result = await searchRepositories(
+            currentQuery,
+            sort,
+            currentPage
+          );
+          totalResults = result.total_count || 0;
+          displayRepositories(result.items || [], false);
+        } catch (err) {
+          document.getElementById("repoList").innerHTML = "";
+          showError(err.message || "An error occurred while searching.");
+        }
+      }
+
+      async function loadMore() {
+        clearError();
+        const sort = document.getElementById("sortSelect").value || "stars";
+        // increment page
+        currentPage += 1;
+        // show a small loading indicator in load-more area
+        const loadMoreContainer = document.getElementById("loadMoreContainer");
+        const prev = loadMoreContainer.innerHTML;
+        loadMoreContainer.innerHTML = `<div class="loading">Loading more results…</div>`;
+
+        try {
+          const result = await searchRepositories(
+            currentQuery,
+            sort,
+            currentPage
+          );
+          // append items
+          displayRepositories(result.items || [], true);
+          totalResults = result.total_count || totalResults;
+        } catch (err) {
+          showError(err.message || "Failed to load more results.");
+          // roll back page number so user can retry
+          currentPage = Math.max(1, currentPage - 1);
+        } finally {
+          updateLoadMore();
+        }
+      }
+
+      function updateLoadMore() {
+        const loadedSoFar = document.querySelectorAll(
+          "#repoList .repo-card"
+        ).length;
+        const loadMoreContainer = document.getElementById("loadMoreContainer");
+        if (totalResults > loadedSoFar) {
+          loadMoreContainer.innerHTML = `<div class="load-more"><button onclick="loadMore()">Load More Results (${loadedSoFar}/${totalResults})</button></div>`;
+        } else {
+          loadMoreContainer.innerHTML = "";
+        }
+      }
+
+      function showError(message) {
+        const container = document.getElementById("errorMessage");
+        container.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+      }
+
+      function clearError() {
+        document.getElementById("errorMessage").innerHTML = "";
+      }
+
+      function formatNumber(num) {
+        if (num === null || num === undefined) return "0";
+        if (num >= 1000000) {
+          return (num / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+        }
+        if (num >= 1000) {
+          return (num / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+        }
+        return String(num);
+      }
+
+      function escapeHtml(unsafe) {
+        return String(unsafe)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+    </script>
+  </body>
+</html>
